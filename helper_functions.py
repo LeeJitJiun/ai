@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, MeanShift, DBSCAN, estimate_bandwidth
-from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+from sklearn.metrics import silhouette_score, davies_bouldin_score
 from sklearn.neighbors import NearestNeighbors
 
 @st.cache_data
-def load_data(filepath="global_university_studentsperformance.csv"):
+def load_data(filepath="student_habits_performance (1).csv"):
     df = pd.read_csv(filepath)
     return df.dropna().reset_index(drop=True)
 
@@ -25,7 +25,6 @@ def preprocess_features(df, selected_features):
     scaler = StandardScaler()
     scaled_matrix = scaler.fit_transform(encoded_df)
     
-    # FIX: Add 'scaler' to the end of this return statement
     return scaled_matrix, encoded_df, scaler
 
 def evaluate_clusters(scaled_matrix, labels):
@@ -54,7 +53,7 @@ def run_kmeans_model(scaled_matrix, n_clusters=3):
     metrics = evaluate_clusters(scaled_matrix, labels)
     return model, labels, metrics, round(float(model.inertia_), 2)
 
-def run_meanshift_model(scaled_matrix, quantile=0.2):
+def run_meanshift_model(scaled_matrix, quantile=0.08):
     bandwidth = estimate_bandwidth(scaled_matrix, quantile=quantile, n_samples=300, random_state=42)
     if bandwidth is None or bandwidth <= 0: bandwidth = 1.0
     model = MeanShift(bandwidth=bandwidth, bin_seeding=True)
@@ -68,7 +67,7 @@ def run_dbscan_model(scaled_matrix, eps=0.1, min_samples=4):
     metrics = evaluate_clusters(scaled_matrix, labels)
     return model, labels, metrics
 
-# --- EVALUATION TABLE GENERATORS ---
+# --- EVALUATION TABLES ---
 
 @st.cache_data
 def get_kmeans_evaluation_table(scaled_matrix, k_min=2, k_max=10):
@@ -86,7 +85,7 @@ def get_kmeans_evaluation_table(scaled_matrix, k_min=2, k_max=10):
 @st.cache_data
 def get_meanshift_evaluation_table(scaled_matrix):
     results = []
-    for q in np.arange(0.05, 0.55, 0.05):
+    for q in np.arange(0.02, 0.20, 0.01):
         q = round(q, 2)
         bw = estimate_bandwidth(scaled_matrix, quantile=q, n_samples=300, random_state=42)
         if bw is None or bw <= 0: bw = 1.0
@@ -104,28 +103,20 @@ def get_meanshift_evaluation_table(scaled_matrix):
 def get_dbscan_evaluation_data(scaled_matrix, max_noise=20.0):
     results = []
     n_samples = len(scaled_matrix)
-    min_cluster_size = int(n_samples * 0.02)  # A "decent" cluster is 2% of the data
+    min_cluster_size = int(n_samples * 0.02)
     
     for e in np.arange(0.10, 1.55, 0.05):
         for m in range(4, 15): 
             model = DBSCAN(eps=e, min_samples=m)
             labels = model.fit_predict(scaled_matrix)
-            
-            # Get unique clusters ignoring noise
             unique_clusters = [c for c in set(labels) if c != -1]
             
             if len(unique_clusters) > 1:
                 noise_ratio = (list(labels).count(-1) / n_samples) * 100
-                
-                # Check if noise is acceptable
                 if noise_ratio <= max_noise:
                     valid_mask = labels != -1
                     clean_labels = labels[valid_mask]
-                    
-                    # Count sizes of valid clusters
                     counts = pd.Series(clean_labels).value_counts()
-                    
-                    # Ensure we have at least TWO decently sized clusters 
                     decent_clusters = sum(counts >= min_cluster_size)
                     
                     if decent_clusters >= 2:
@@ -139,12 +130,11 @@ def get_dbscan_evaluation_data(scaled_matrix, max_noise=20.0):
                         })
     return pd.DataFrame(results)
 
-# --- IMPROVED AUTO-TUNERS ---
+# --- AUTO-TUNERS ---
 
 @st.cache_data
 def optimize_kmeans_params(scaled_matrix):
     df = get_kmeans_evaluation_table(scaled_matrix)
-    # Balance Silhouette Score and Davies-Bouldin Index (higher Sil, lower DB)
     df['Combined_Score'] = df['Silhouette Score'] / (df['Davies-Bouldin'] + 1e-5)
     best_k = df.loc[df['Combined_Score'].idxmax()]['K']
     return int(best_k)
@@ -152,25 +142,18 @@ def optimize_kmeans_params(scaled_matrix):
 @st.cache_data
 def optimize_meanshift_params(scaled_matrix):
     df = get_meanshift_evaluation_table(scaled_matrix)
-    n_samples = len(scaled_matrix)
-    min_cluster_size = int(n_samples * 0.03)  # Require at least 3% of data per cluster
-    
     valid = df[df['Clusters Found'] > 1]
     if not valid.empty:
         return float(valid.loc[valid['Silhouette Score'].idxmax()]['Quantile'])
-    return 0.20
+    return 0.08
 
 @st.cache_data
 def optimize_dbscan_params(scaled_matrix):
-    # Try to find the best configuration with under 15% noise
     df = get_dbscan_evaluation_data(scaled_matrix, max_noise=15.0)
-    
     if not df.empty:
-        # Sort by best silhouette score
         best = df.loc[df['silhouette'].idxmax()]
         return float(best['eps']), int(best['min_samples'])
         
-    # SMARTER FALLBACK: If grid search fails, mathematically estimate a good EPS based on neighbor distances
     distances, _ = NearestNeighbors(n_neighbors=5).fit(scaled_matrix).kneighbors(scaled_matrix)
     suggested_eps = max(0.1, round(float(np.percentile(distances[:, -1], 85)), 2))
     return suggested_eps, 5
