@@ -7,7 +7,7 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_har
 from sklearn.neighbors import NearestNeighbors
 
 @st.cache_data
-def load_data(filepath="student_habits_performance (1).csv"):
+def load_data(filepath="global_university_studentsperformance.csv"):
     df = pd.read_csv(filepath)
     return df.dropna().reset_index(drop=True)
 
