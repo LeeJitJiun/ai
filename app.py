@@ -369,45 +369,119 @@ with tab1:
                 st.plotly_chart(fig_hm, use_container_width=True)
 
 with tab2:
-    st.subheader("Comparison of All 3 Clustering Algorithms")
-    st.caption("Evaluated on the current feature selection.")
+    st.subheader("⚔️ Comparison of All 3 Clustering Algorithms")
+    st.caption("Evaluated on the current feature selection. Adjust parameters below to compare different configurations.")
     
-    km_m, km_l, km_met, km_i = run_kmeans_model(scaled_matrix, n_clusters=3)
-    ms_m, ms_l, ms_met, ms_bw = run_meanshift_model(scaled_matrix, quantile=0.20)
-    db_m, db_l, db_met = run_dbscan_model(scaled_matrix, eps=0.10, min_samples=4)
+    # --- INTERACTIVE COMPARISON PARAMETERS ---
+    st.markdown("**Adjust Comparison Parameters:**")
+    
+    comp_col1, comp_col2, comp_col3 = st.columns(3)
+    
+    with comp_col1:
+        st.markdown("**K-Means**")
+        km_k_comp = st.slider("K value for K-Means", min_value=2, max_value=10, value=3, key='km_comp_k')
+    
+    with comp_col2:
+        st.markdown("**MeanShift**")
+        ms_q_comp = st.slider("Quantile for MeanShift", min_value=0.05, max_value=0.50, step=0.05, value=0.20, key='ms_comp_q')
+    
+    with comp_col3:
+        st.markdown("**DBSCAN**")
+        db_eps_comp = st.slider("EPS for DBSCAN", min_value=0.05, max_value=1.0, step=0.05, value=0.10, key='db_comp_eps')
+        db_min_comp = st.slider("Min Samples for DBSCAN", min_value=2, max_value=15, value=4, key='db_comp_min')
+    
+    # Run models with comparison parameters
+    km_m, km_l, km_met, km_i = run_kmeans_model(scaled_matrix, n_clusters=int(km_k_comp))
+    ms_m, ms_l, ms_met, ms_bw = run_meanshift_model(scaled_matrix, quantile=float(ms_q_comp))
+    db_m, db_l, db_met = run_dbscan_model(scaled_matrix, eps=float(db_eps_comp), min_samples=int(db_min_comp))
+    
+    # --- SILHOUETTE SCORE COMPARISON CHART ---
+    st.markdown("---")
+    st.markdown("**📊 Silhouette Score Comparison**")
+    
+    silhouette_comparison = pd.DataFrame({
+        'Algorithm': ['K-Means', 'MeanShift', 'DBSCAN'],
+        'Silhouette Score': [
+            km_met['silhouette'],
+            ms_met['silhouette'],
+            db_met['silhouette']
+        ]
+    })
+    
+    fig_silhouette = go.Figure(
+        data=[
+            go.Bar(
+                x=silhouette_comparison['Algorithm'],
+                y=silhouette_comparison['Silhouette Score'],
+                marker=dict(
+                    color=['#ff4b4b', '#00d26a', '#ffa500'],
+                    line=dict(color='white', width=2)
+                ),
+                text=[f"{val:.3f}" for val in silhouette_comparison['Silhouette Score']],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>Silhouette Score: %{y:.4f}<extra></extra>'
+            )
+        ]
+    )
+    
+    fig_silhouette.update_layout(
+        height=350,
+        template="plotly_dark",
+        xaxis=dict(title="Algorithm"),
+        yaxis=dict(title="Silhouette Score", range=[-1, 1]),
+        showlegend=False
+    )
+    
+    st.plotly_chart(fig_silhouette, use_container_width=True)
+    
+    # --- DETAILED COMPARISON TABLE ---
+    st.markdown("**📋 Detailed Metrics Comparison**")
     
     comp_data = [
         {
-            "Algorithm": "K-Means (K=3)",
-            "Clusters": len([c for c in set(km_l) if c != -1]),
-            "Silhouette Score": km_met['silhouette'],
-            "Davies-Bouldin": km_met['davies_bouldin'] if km_met['davies_bouldin'] is not None else "N/A",
-            "Inertia": km_i,
-            "Noise Ratio (%)": f"{km_met['noise_ratio']}%",
-            "Best For": "Spherical, equal-sized clusters"
+            "Algorithm": f"K-Means (K={int(km_k_comp)})",
+            "Silhouette Score": f"{km_met['silhouette']:.4f}",
+            "Davies-Bouldin": f"{km_met['davies_bouldin']:.4f}" if km_met['davies_bouldin'] is not None else "N/A",
+            "Clusters Found": len([c for c in set(km_l) if c != -1]),
+            "Noise Ratio (%)": f"{km_met['noise_ratio']:.2f}%",
+            "Inertia (WCSS)": f"{km_i:.2f}",
         },
         {
-            "Algorithm": "MeanShift",
-            "Clusters": len([c for c in set(ms_l) if c != -1]),
-            "Silhouette Score": ms_met['silhouette'],
-            "Davies-Bouldin": ms_met['davies_bouldin'] if ms_met['davies_bouldin'] is not None else "N/A",
-            "Inertia": "N/A",
-            "Noise Ratio (%)": f"{ms_met['noise_ratio']}%",
-            "Best For": "Automatic cluster count finding"
+            "Algorithm": f"MeanShift (Q={float(ms_q_comp):.2f})",
+            "Silhouette Score": f"{ms_met['silhouette']:.4f}",
+            "Davies-Bouldin": f"{ms_met['davies_bouldin']:.4f}" if ms_met['davies_bouldin'] is not None else "N/A",
+            "Clusters Found": len([c for c in set(ms_l) if c != -1]),
+            "Noise Ratio (%)": f"{ms_met['noise_ratio']:.2f}%",
+            "Bandwidth": f"{ms_bw:.4f}",
         },
         {
-            "Algorithm": "DBSCAN",
-            "Clusters": len([c for c in set(db_l) if c != -1]),
-            "Silhouette Score": db_met['silhouette'],
-            "Davies-Bouldin": db_met['davies_bouldin'] if db_met['davies_bouldin'] is not None else "N/A",
-            "Inertia": "N/A",
-            "Noise Ratio (%)": f"{db_met['noise_ratio']}%",
-            "Best For": "Arbitrary shapes & outlier detection"
+            "Algorithm": f"DBSCAN (EPS={float(db_eps_comp):.2f}, MS={int(db_min_comp)})",
+            "Silhouette Score": f"{db_met['silhouette']:.4f}",
+            "Davies-Bouldin": f"{db_met['davies_bouldin']:.4f}" if db_met['davies_bouldin'] is not None else "N/A",
+            "Clusters Found": len([c for c in set(db_l) if c != -1]),
+            "Noise Ratio (%)": f"{db_met['noise_ratio']:.2f}%",
+            "Inertia (WCSS)": "N/A",
         }
     ]
     
     comp_df = pd.DataFrame(comp_data)
     st.dataframe(comp_df, hide_index=True, use_container_width=True)
+    
+    # --- BEST ALGORITHM RECOMMENDATION ---
+    st.markdown("---")
+    best_algorithm = silhouette_comparison.loc[silhouette_comparison['Silhouette Score'].idxmax()]
+    
+    col_rec1, col_rec2 = st.columns([2, 1])
+    with col_rec1:
+        st.success(f"🏆 **Best Silhouette Score:** {best_algorithm['Algorithm']} with score **{best_algorithm['Silhouette Score']:.4f}**")
+    
+    with col_rec2:
+        st.markdown("**⚡ Quick Tips:**")
+        st.caption(
+            "🔵 **K-Means:** Fast, works well with spherical clusters\n\n"
+            "🟢 **MeanShift:** Auto cluster detection, handles varied sizes\n\n"
+            "🟠 **DBSCAN:** Best for arbitrary shapes & outlier detection"
+        )
 
 # ---------------- PREDICTION RESULTS AREA ----------------
 # Only run this logic IF the user clicks the submit button
