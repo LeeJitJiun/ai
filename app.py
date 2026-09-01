@@ -46,10 +46,6 @@ def optimize_kmeans_params(scaled_matrix, max_k=10):
     return k_values[np.argmax(distances)]
 
 def optimize_meanshift_params(scaled_matrix):
-    """
-    Fine-grained search across lower quantiles (0.02 - 0.18).
-    Guarantees finding a bandwidth that yields 2 to 10 clusters.
-    """
     quantiles = np.arange(0.02, 0.18, 0.01)
     best_quantile = 0.08
     best_score = -1.0
@@ -98,7 +94,6 @@ def optimize_dbscan_params(scaled_matrix):
 
 # ---------------- STREAMLIT APP CONFIG ----------------
 st.set_page_config(page_title="Student Clustering Dashboard", layout="wide", page_icon="🎓")
-st.title("🎓 Student Habits & Performance Clustering")
 
 try:
     df = load_data()
@@ -111,81 +106,101 @@ numeric_cols = [
     if pd.api.types.is_numeric_dtype(df[c]) and c.lower() not in ['student_id', 'exam_score']
 ]
 
-# ---------------- SIDEBAR CONTROLS ----------------
-st.sidebar.header("⚙️ Model Controls")
+# ---------------- SIDEBAR STRUCTURE & LAYOUT ----------------
 
-view_dim = st.sidebar.radio("Visualization Mode", ["2D Mode (2 Features)", "3D Mode (3 Features)"])
-
+# 1. Top Left App Title
+st.sidebar.markdown("## 🤖 Unsupervised Machine Learning")
 st.sidebar.markdown("---")
-st.sidebar.header("📊 Feature Selection")
 
-feat_x = st.sidebar.selectbox("Select X-Axis Feature", numeric_cols, index=0)
-feat_y = st.sidebar.selectbox("Select Y-Axis Feature", numeric_cols, index=1 if len(numeric_cols) > 1 else 0)
-
-if view_dim == "2D Mode (2 Features)":
-    selected_features = list(dict.fromkeys([feat_x, feat_y]))
-else:
-    feat_z = st.sidebar.selectbox("Select Z-Axis Feature", numeric_cols, index=2 if len(numeric_cols) > 2 else 0)
-    selected_features = list(dict.fromkeys([feat_x, feat_y, feat_z]))
-
+# 2. Main Navigation moved to Top of Sidebar
+nav_container = st.sidebar.container()
 st.sidebar.markdown("---")
-st.sidebar.header("🤖 Clustering Algorithm")
 
-algorithm = st.sidebar.selectbox("Choose Algorithm", ["K-Means", "MeanShift", "DBSCAN"])
+# Reserve ordered sidebar containers
+algo_container = st.sidebar.container()
+st.sidebar.markdown("---")
+mode_container = st.sidebar.container()
+st.sidebar.markdown("---")
+feat_container = st.sidebar.container()
 
+# Render Navigation Radio
+with nav_container:
+    app_mode = st.radio(
+        "Navigation", 
+        ["📊 Dataset Analysis", "🔮 User Data Predictor"], 
+        label_visibility="collapsed"
+    )
+
+# Render Section 2: Model Controls
+with mode_container:
+    st.header("⚙️ Model Controls")
+    view_dim = st.radio("Visualization Mode", ["2D Mode (2 Features)", "3D Mode (3 Features)"])
+
+# Render Section 3: Feature Selection
+with feat_container:
+    st.header("📊 Feature Selection")
+    default_x_idx = numeric_cols.index("attendance_percentage") if "attendance_percentage" in numeric_cols else 0
+    feat_x = st.selectbox("Select X-Axis Feature", numeric_cols, index=default_x_idx)
+    feat_y = st.selectbox("Select Y-Axis Feature", numeric_cols, index=1 if len(numeric_cols) > 1 else 0)
+
+    if view_dim == "2D Mode (2 Features)":
+        selected_features = list(dict.fromkeys([feat_x, feat_y]))
+    else:
+        feat_z = st.selectbox("Select Z-Axis Feature", numeric_cols, index=2 if len(numeric_cols) > 2 else 0)
+        selected_features = list(dict.fromkeys([feat_x, feat_y, feat_z]))
+
+# Preprocess matrix based on selection
 scaled_matrix, encoded_df, scaler = preprocess_features(df, tuple(selected_features))
 current_inertia = None
 
-if algorithm == "K-Means":
-    if 'km_k' not in st.session_state:
-        st.session_state['km_k'] = 3
-        
-    if st.sidebar.button("🤖 Auto-Tune K-Means", use_container_width=True):
-        with st.spinner("Finding optimal K using elbow method..."):
-            best_k = optimize_kmeans_params(scaled_matrix)
-            st.session_state['km_k'] = int(best_k)
-            st.rerun()
-        
-    k = st.sidebar.slider("Number of Clusters (K)", min_value=2, max_value=10, key='km_k')
-    model, labels, metrics, current_inertia = run_kmeans_model(scaled_matrix, n_clusters=k)
+# Render Section 1: Clustering Algorithm (at top of controls)
+with algo_container:
+    st.header("🤖 Clustering Algorithm")
+    algorithm = st.selectbox("Choose Algorithm", ["K-Means", "MeanShift", "DBSCAN"])
 
-elif algorithm == "MeanShift":
-    # Default to 0.08 for optimal multi-cluster separation
-    if 'ms_q' not in st.session_state:
-        st.session_state['ms_q'] = 0.08
-        
-    if st.sidebar.button("🤖 Auto-Tune MeanShift", use_container_width=True):
-        with st.spinner("Finding optimal quantile..."):
-            best_q = optimize_meanshift_params(scaled_matrix)
-            st.session_state['ms_q'] = float(best_q)
-            st.rerun()
-        
-    quantile = st.sidebar.slider(
-        "Bandwidth Quantile (Density)", 
-        min_value=0.01, 
-        max_value=0.20, 
-        step=0.01, 
-        key='ms_q'
-    )
-    model, labels, metrics, computed_bw = run_meanshift_model(scaled_matrix, quantile=quantile)
-    st.sidebar.info(f"Computed Bandwidth: **{computed_bw:.2f}**")
+    if algorithm == "K-Means":
+        if 'km_k' not in st.session_state:
+            st.session_state['km_k'] = 3
+            
+        if st.button("🤖 Auto-Tune K-Means", use_container_width=True):
+            with st.spinner("Finding optimal K using elbow method..."):
+                best_k = optimize_kmeans_params(scaled_matrix)
+                st.session_state['km_k'] = int(best_k)
+                st.rerun()
+            
+        k = st.slider("Number of Clusters (K)", min_value=2, max_value=10, key='km_k')
+        model, labels, metrics, current_inertia = run_kmeans_model(scaled_matrix, n_clusters=k)
 
-elif algorithm == "DBSCAN":
-    if 'db_eps' not in st.session_state:
-        st.session_state['db_eps'] = 0.10
-    if 'db_min' not in st.session_state:
-        st.session_state['db_min'] = 4
-        
-    if st.sidebar.button("🤖 Auto-Tune DBSCAN", use_container_width=True):
-        with st.spinner("Finding optimal EPS and Min Samples..."):
-            e, m = optimize_dbscan_params(scaled_matrix)
-            st.session_state['db_eps'] = float(round(e / 0.05) * 0.05)
-            st.session_state['db_min'] = int(m)
-            st.rerun()
-        
-    eps = st.sidebar.slider("EPS (Neighborhood Radius)", min_value=0.05, max_value=5.0, step=0.05, key='db_eps')
-    min_samples = st.sidebar.slider("Min Samples", min_value=2, max_value=20, key='db_min')
-    model, labels, metrics = run_dbscan_model(scaled_matrix, eps=eps, min_samples=min_samples)
+    elif algorithm == "MeanShift":
+        if 'ms_q' not in st.session_state:
+            st.session_state['ms_q'] = 0.08
+            
+        if st.button("🤖 Auto-Tune MeanShift", use_container_width=True):
+            with st.spinner("Finding optimal quantile..."):
+                best_q = optimize_meanshift_params(scaled_matrix)
+                st.session_state['ms_q'] = float(best_q)
+                st.rerun()
+            
+        quantile = st.slider("Bandwidth Quantile (Density)", min_value=0.01, max_value=0.20, step=0.01, key='ms_q')
+        model, labels, metrics, computed_bw = run_meanshift_model(scaled_matrix, quantile=quantile)
+        st.info(f"Computed Bandwidth: **{computed_bw:.2f}**")
+
+    elif algorithm == "DBSCAN":
+        if 'db_eps' not in st.session_state:
+            st.session_state['db_eps'] = 0.10
+        if 'db_min' not in st.session_state:
+            st.session_state['db_min'] = 4
+            
+        if st.button("🤖 Auto-Tune DBSCAN", use_container_width=True):
+            with st.spinner("Finding optimal EPS and Min Samples..."):
+                e, m = optimize_dbscan_params(scaled_matrix)
+                st.session_state['db_eps'] = float(round(e / 0.05) * 0.05)
+                st.session_state['db_min'] = int(m)
+                st.rerun()
+            
+        eps = st.slider("EPS (Neighborhood Radius)", min_value=0.05, max_value=5.0, step=0.05, key='db_eps')
+        min_samples = st.slider("Min Samples", min_value=2, max_value=20, key='db_min')
+        model, labels, metrics = run_dbscan_model(scaled_matrix, eps=eps, min_samples=min_samples)
 
 # Prepare DataFrame Labels
 df['Cluster'] = labels
@@ -194,13 +209,10 @@ ordered_labels = [f"Noise (-1)" if x == -1 else f"Cluster {x:02d}" for x in sort
 df['Cluster_Label'] = df['Cluster'].apply(lambda x: f"Noise (-1)" if x == -1 else f"Cluster {x:02d}")
 df['Cluster_Label'] = pd.Categorical(df['Cluster_Label'], categories=ordered_labels, ordered=True)
 
-# ---------------- MAIN TOP-LEVEL TABS ----------------
-tab_dataset, tab_user = st.tabs(["📊 Dataset Analysis", "🔮 User Data Predictor"])
+# ---------------- MAIN CONTENT AREA ----------------
+st.title("🎓 Student Habits & Performance Clustering")
 
-# ==============================================================================
-# TAB 1: DATASET ANALYSIS
-# ==============================================================================
-with tab_dataset:
+if app_mode == "📊 Dataset Analysis":
     col1, col2 = st.columns([2.2, 1])
 
     with col1:
@@ -335,20 +347,33 @@ with tab_dataset:
                     top_10 = eval_data.sort_values(by=['silhouette', 'noise_ratio'], ascending=[False, True]).head(10)
                     st.dataframe(top_10, hide_index=True, use_container_width=True)
                 else:
-                    st.write("No valid configurations found within the noise threshold.")
+                    st.warning("No configurations found with >= 2 clusters under 50% noise threshold.")
             with col_t2:
                 st.markdown("**Silhouette Score Heatmap (EPS vs Min Samples):**")
                 if not eval_data.empty:
-                    pivot_df = eval_data.pivot(index='eps', columns='min_samples', values='silhouette')
-                    fig_hm = go.Figure(data=go.Heatmap(z=pivot_df.values, x=pivot_df.columns, y=pivot_df.index, colorscale='Viridis'))
-                    fig_hm.update_layout(height=380, template="plotly_dark", xaxis=dict(title=dict(text="Min Samples")), yaxis=dict(title=dict(text="EPS")))
+                    pivot_df = eval_data.pivot(index='eps', columns='min_samples', values='silhouette').fillna(0)
+                    
+                    fig_hm = go.Figure(data=go.Heatmap(
+                        z=pivot_df.values, 
+                        x=pivot_df.columns, 
+                        y=pivot_df.index, 
+                        colorscale='Viridis',
+                        colorbar=dict(title="Silhouette")
+                    ))
+                    fig_hm.update_layout(
+                        height=380, 
+                        template="plotly_dark", 
+                        xaxis=dict(title=dict(text="Min Samples")), 
+                        yaxis=dict(title=dict(text="EPS"))
+                    )
                     st.plotly_chart(fig_hm, use_container_width=True)
+                else:
+                    st.info("Heatmap unavailable until valid configurations are found.")
 
-with eval_tab2:
+    with eval_tab2:
         st.subheader("⚔️ Comparison of All 3 Clustering Algorithms")
         st.caption("Evaluated on the current feature selection. Automatically tuned or manually adjusted for direct comparison.")
 
-        # Automatically calculate optimal defaults if not set in session state
         if 'comp_k' not in st.session_state:
             st.session_state['comp_k'] = optimize_kmeans_params(scaled_matrix)
         if 'comp_q' not in st.session_state:
@@ -358,7 +383,6 @@ with eval_tab2:
             st.session_state['comp_eps'] = float(round(e_opt / 0.05) * 0.05)
             st.session_state['comp_min'] = int(m_opt)
 
-        # Header with One-Click Auto-Tune All Button
         col_hdr, col_btn = st.columns([2.2, 1])
         with col_hdr:
             st.markdown("**Adjust Comparison Parameters:**")
@@ -372,7 +396,6 @@ with eval_tab2:
                     st.session_state['comp_min'] = int(m_opt)
                     st.rerun()
 
-        # 1. Interactive Comparison Sliders (Initialized to Best Auto-Tuned Values)
         col_km, col_ms, col_db = st.columns(3)
         
         with col_km:
@@ -388,14 +411,12 @@ with eval_tab2:
             comp_eps = st.slider("EPS for DBSCAN", min_value=0.05, max_value=2.00, step=0.05, key="comp_eps")
             comp_min = st.slider("Min Samples for DBSCAN", min_value=2, max_value=20, key="comp_min")
 
-        # Evaluate all models with selected/auto-tuned parameters
         km_m, km_l, km_met, km_i = run_kmeans_model(scaled_matrix, n_clusters=comp_k)
         ms_m, ms_l, ms_met, ms_bw = run_meanshift_model(scaled_matrix, quantile=comp_q)
         db_m, db_l, db_met = run_dbscan_model(scaled_matrix, eps=comp_eps, min_samples=comp_min)
 
         st.markdown("---")
 
-        # 2. Silhouette Score Comparison Chart
         st.markdown("📊 **Silhouette Score Comparison**")
         fig_bar = go.Figure()
         
@@ -423,7 +444,6 @@ with eval_tab2:
 
         st.markdown("---")
 
-        # 3. Dynamic Comparison Data Table
         st.markdown("📋 **Detailed Metrics Summary**")
         comp_data = [
             {
@@ -456,12 +476,20 @@ with eval_tab2:
         ]
         st.dataframe(pd.DataFrame(comp_data), hide_index=True, use_container_width=True)
 
-# ==============================================================================
-# TAB 2: USER DATA PREDICTOR
-# ==============================================================================
-with tab_user:
+elif app_mode == "🔮 User Data Predictor":
     st.header("🔮 Custom Student Cluster Prediction Engine")
-    st.write("Input custom student habits to predict their cluster assignment and visualize where they land relative to the dataset.")
+    st.write("Input custom student habits to predict their K-Means cluster assignment and visualize where they land relative to the dataset.")
+
+    forced_k = st.session_state.get('km_k', 3)
+    km_model_user, km_labels_user, _, _ = run_kmeans_model(scaled_matrix, n_clusters=forced_k)
+    
+    km_df = df.copy()
+    km_df['Cluster_Label'] = [f"Cluster {lbl:02d}" for lbl in km_labels_user]
+    km_df['Cluster_Label'] = pd.Categorical(
+        km_df['Cluster_Label'], 
+        categories=sorted(km_df['Cluster_Label'].unique()), 
+        ordered=True
+    )
 
     with st.form(key='main_prediction_form'):
         st.subheader("1. Enter Student Habits")
@@ -484,40 +512,31 @@ with tab_user:
         input_df = pd.DataFrame([user_inputs])
         scaled_input = scaler.transform(input_df)
         
-        if algorithm in ["K-Means", "MeanShift"]:
-            pred_label = model.predict(scaled_input)[0]
-        elif algorithm == "DBSCAN":
-            nn = NearestNeighbors(n_neighbors=1).fit(scaled_matrix)
-            _, indices = nn.kneighbors(scaled_input)
-            pred_label = labels[indices[0][0]]
-            
-        pred_label_str = f"Cluster {pred_label:02d}" if pred_label != -1 else "Noise (-1)"
+        pred_label = km_model_user.predict(scaled_input)[0]
+        pred_label_str = f"Cluster {pred_label:02d}"
         
         res_col1, res_col2 = st.columns(2)
         with res_col1:
-            st.success(f"### Predicted Assignment: **{pred_label_str}**")
+            st.success(f"### Predicted K-Means Assignment: **{pred_label_str}**")
         with res_col2:
-            if 'exam_score' in df.columns:
-                cluster_students = df[labels == pred_label]
+            if 'exam_score' in km_df.columns:
+                cluster_students = km_df[km_labels_user == pred_label]
                 if not cluster_students.empty:
                     avg_score = cluster_students['exam_score'].mean()
                     st.info(f"### Expected Exam Score: **{avg_score:.2f}**")
-                elif pred_label == -1:
-                    st.warning("### Unique Student Habits (Outlier / Noise)")
 
-        st.subheader("3. Custom Input Location vs Dataset Clusters")
+        st.subheader(f"3. Custom Input Location vs K-Means Clusters (K={forced_k})")
         
         if view_dim == "2D Mode (2 Features)":
             fig_user_plot = px.scatter(
-                df, x=feat_x, y=feat_y, color="Cluster_Label",
+                km_df, x=feat_x, y=feat_y, color="Cluster_Label",
                 color_discrete_sequence=px.colors.qualitative.Bold,
                 opacity=0.4, title=f"User Position Overlay ({feat_x} vs {feat_y})"
             )
             fig_user_plot.update_traces(marker=dict(size=8))
             
             fig_user_plot.add_trace(go.Scatter(
-                x=[user_inputs[feat_x]],
-                y=[user_inputs[feat_y]],
+                x=[user_inputs[feat_x]], y=[user_inputs[feat_y]],
                 mode='markers',
                 marker=dict(size=18, color='#FFD700', symbol='star', line=dict(width=2, color='black')),
                 name='⭐ Your Custom Input'
@@ -525,16 +544,14 @@ with tab_user:
             fig_user_plot.update_layout(height=520, template="plotly_dark")
         else:
             fig_user_plot = px.scatter_3d(
-                df, x=feat_x, y=feat_y, z=feat_z, color="Cluster_Label",
+                km_df, x=feat_x, y=feat_y, z=feat_z, color="Cluster_Label",
                 color_discrete_sequence=px.colors.qualitative.Bold,
                 opacity=0.4, title=f"User Position Overlay 3D ({feat_x}, {feat_y}, {feat_z})"
             )
             fig_user_plot.update_traces(marker=dict(size=5))
             
             fig_user_plot.add_trace(go.Scatter3d(
-                x=[user_inputs[feat_x]],
-                y=[user_inputs[feat_y]],
-                z=[user_inputs[feat_z]],
+                x=[user_inputs[feat_x]], y=[user_inputs[feat_y]], z=[user_inputs[feat_z]],
                 mode='markers',
                 marker=dict(size=12, color='#FFD700', symbol='diamond', line=dict(width=2, color='black')),
                 name='⭐ Your Custom Input'

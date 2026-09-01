@@ -100,34 +100,40 @@ def get_meanshift_evaluation_table(scaled_matrix):
     return pd.DataFrame(results)
 
 @st.cache_data
-def get_dbscan_evaluation_data(scaled_matrix, max_noise=20.0):
+def get_dbscan_evaluation_data(scaled_matrix, max_noise=50.0):
+    """
+    Evaluates DBSCAN hyperparameter combinations across standard EPS and Min_Samples ranges.
+    Returns valid configurations with >= 2 clusters and <= 50% noise.
+    """
     results = []
     n_samples = len(scaled_matrix)
-    min_cluster_size = int(n_samples * 0.02)
     
-    for e in np.arange(0.10, 1.55, 0.05):
-        for m in range(4, 15): 
+    # Expanded EPS range suitable for StandardScaler normalized features
+    eps_values = [0.15, 0.25, 0.35, 0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00]
+    min_samples_range = [3, 4, 6, 8, 10, 12]
+    
+    for e in eps_values:
+        for m in min_samples_range: 
             model = DBSCAN(eps=e, min_samples=m)
             labels = model.fit_predict(scaled_matrix)
             unique_clusters = [c for c in set(labels) if c != -1]
             
-            if len(unique_clusters) > 1:
-                noise_ratio = (list(labels).count(-1) / n_samples) * 100
+            # Require at least 2 distinct clusters and reasonable noise
+            if len(unique_clusters) >= 2:
+                noise_ratio = (list(labels).count(-1) / n_samples) * 100.0
                 if noise_ratio <= max_noise:
                     valid_mask = labels != -1
                     clean_labels = labels[valid_mask]
-                    counts = pd.Series(clean_labels).value_counts()
-                    decent_clusters = sum(counts >= min_cluster_size)
+                    sil = float(silhouette_score(scaled_matrix[valid_mask], clean_labels))
                     
-                    if decent_clusters >= 2:
-                        sil = float(silhouette_score(scaled_matrix[valid_mask], clean_labels))
-                        results.append({
-                            'eps': round(e, 2), 
-                            'min_samples': m, 
-                            'silhouette': sil, 
-                            'noise_ratio': noise_ratio,
-                            'n_clusters': len(unique_clusters)
-                        })
+                    results.append({
+                        'eps': round(e, 2), 
+                        'min_samples': m, 
+                        'silhouette': round(sil, 4), 
+                        'noise_ratio': round(noise_ratio, 2),
+                        'n_clusters': len(unique_clusters)
+                    })
+                    
     return pd.DataFrame(results)
 
 # --- AUTO-TUNERS ---
